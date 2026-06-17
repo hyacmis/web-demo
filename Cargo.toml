@@ -67,7 +67,7 @@ config = "0.15.23"
 http-body-util = "0.1.3"
 
 # JWT 认证
-jsonwebtoken = "9.3"
+jsonwebtoken = "10.3.0"
 
 # 密码哈希
 bcrypt = "0.16"
