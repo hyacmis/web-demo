@@ -24,10 +24,22 @@ async fn main() {
     let _guard = logger::init(&CONFIG);
 
     // 初始化数据库连接（自动同步 Schema）
-    let db = db::init(&CONFIG.database).await.expect("数据库连接失败");
+    let db = match db::init(&CONFIG.database).await {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::error!("数据库连接失败: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     // 初始化 Redis 连接
-    let redis_conn = db::init_redis(&CONFIG.redis).await.expect("Redis 连接失败");
+    let redis_conn = match db::init_redis(&CONFIG.redis).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("Redis 连接失败: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     // 请求日志中间件：记录每个请求和响应
     let trace = TraceLayer::new_for_http()
@@ -64,14 +76,27 @@ async fn main() {
 
     // 绑定监听地址
     let server_url = format!("{}:{}", &CONFIG.app.host, &CONFIG.app.port);
-    let listener = tokio::net::TcpListener::bind(&server_url).await.unwrap();
-    info!("listening on http://{}", listener.local_addr().unwrap());
+    let listener = match tokio::net::TcpListener::bind(&server_url).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("failed to bind {}: {}", server_url, e);
+            std::process::exit(1);
+        }
+    };
+
+    match listener.local_addr() {
+        Ok(addr) => info!("listening on http://{}", addr),
+        Err(e) => tracing::warn!("listening on {} (local_addr unavailable: {})", server_url, e),
+    }
 
     // 启动服务器，支持优雅关闭（收到信号后等待请求处理完成再退出）
-    axum::serve(listener, app)
+    if let Err(e) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
-        .unwrap();
+    {
+        tracing::error!("server exited with error: {}", e);
+        std::process::exit(1);
+    }
 }
 
 /// 监听关闭信号：Ctrl+C（本地开发）或 SIGTERM（Docker/系统 kill）
@@ -79,18 +104,24 @@ async fn main() {
 async fn shutdown_signal() {
     // 监听 Ctrl+C（本地开发环境）
     let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
+        if let Err(e) = signal::ctrl_c().await {
+            tracing::error!("failed to install Ctrl+C handler: {}", e);
+        }
     };
 
     // 监听 SIGTERM（Docker 容器收到 docker stop 时触发）
     #[cfg(unix)]
     let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .unwrap()
-            .recv()
-            .await
+        match signal::unix::signal(signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => {
+                let _ = s.recv().await;
+            }
+            Err(e) => {
+                tracing::error!("failed to install SIGTERM handler: {}", e);
+                // 如果安装失败则阻塞，不触发关闭
+                std::future::pending::<()>().await;
+            }
+        }
     };
 
     // Windows 不支持 SIGTERM，使用 pending 占位
