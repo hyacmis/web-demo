@@ -68,6 +68,24 @@ pub fn ok<T>(data: T) -> ApiResult<T> {
     Ok(Json(data))
 }
 
+/// 启动阶段的致命错误
+///
+/// 由 `main` 返回 `Err` 结束进程：进程以非零状态码退出，且 `main` 返回后
+/// logger guard 才会析构并刷新缓冲日志，比 `std::process::exit` 更可靠。
+///
+/// 与 [`AppError`] 刻意分开：`AppError` 面向 HTTP 请求并实现了 `IntoResponse`，
+/// 而本类型只描述「进程无法启动」，不产生任何响应。
+#[derive(Error, Debug)]
+pub enum StartupError {
+    /// 服务运行失败，例如监听 socket 出错
+    #[error("服务启动失败: {0}")]
+    Serve(#[from] std::io::Error),
+    /// 初始化步骤失败，只保留可公开的说明
+    /// （数据库 / Redis 连接的详细原因已单独写入日志，避免凭据进入 stderr）
+    #[error("初始化失败: {0}")]
+    Init(String),
+}
+
 #[cfg(test)]
 mod tests {
     use axum::http::StatusCode;
@@ -129,5 +147,23 @@ mod tests {
         let db_err = sea_orm::DbErr::Custom("conn failed".to_string());
         let err: AppError = db_err.into();
         assert!(matches!(err, AppError::DB(_)));
+    }
+
+    #[test]
+    fn startup_error_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::AddrInUse, "地址已被占用");
+        let err: StartupError = io_err.into();
+        assert!(matches!(err, StartupError::Serve(_)));
+        assert!(
+            format!("{}", err).contains("服务启动失败"),
+            "Display 应包含启动失败前缀: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn startup_error_init_display() {
+        let err = StartupError::Init("数据库连接失败".to_string());
+        assert_eq!(format!("{}", err), "初始化失败: 数据库连接失败");
     }
 }

@@ -8,6 +8,7 @@ use utoipa_scalar::{Scalar, Servable};
 
 use api_doc::ApiDoc;
 use constants::{AppState, CONFIG};
+use project::error::StartupError;
 use project::middlewares::auth::auth_middleware;
 use project::{db, fallback, logger, middlewares::response::redirect_response};
 
@@ -18,7 +19,7 @@ mod helper;
 mod project;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), StartupError> {
     // 初始化日志系统，返回 guard 用于保持日志写入器存活
     // guard 必须保持到程序结束，否则日志可能未写入就丢失
     let _guard = logger::init(&CONFIG);
@@ -28,7 +29,7 @@ async fn main() {
         Ok(d) => d,
         Err(e) => {
             tracing::error!("数据库连接失败: {}", e);
-            std::process::exit(1);
+            return Err(StartupError::Init("数据库连接失败".into()));
         }
     };
 
@@ -37,7 +38,7 @@ async fn main() {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("Redis 连接失败: {}", e);
-            std::process::exit(1);
+            return Err(StartupError::Init("Redis 连接失败".into()));
         }
     };
 
@@ -80,7 +81,7 @@ async fn main() {
         Ok(l) => l,
         Err(e) => {
             tracing::error!("failed to bind {}: {}", server_url, e);
-            std::process::exit(1);
+            return Err(StartupError::Init(format!("端口绑定失败: {server_url}")));
         }
     };
 
@@ -94,22 +95,27 @@ async fn main() {
     }
 
     // 启动服务器，支持优雅关闭（收到信号后等待请求处理完成再退出）
-    if let Err(e) = axum::serve(listener, app)
+    // 运行期错误直接上抛：`main` 返回 Err 即以非零状态码退出，而不是 panic
+    axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
-        .await
-    {
-        tracing::error!("server exited with error: {}", e);
-        std::process::exit(1);
-    }
+        .await?;
+
+    Ok(())
 }
 
 /// 监听关闭信号：Ctrl+C（本地开发）或 SIGTERM（Docker/系统 kill）
 /// 收到信号后等待正在处理的请求完成，再安全关闭服务器
+///
+/// 注意：注册信号处理器失败时不能提前结束等待，否则会「误触发」优雅关闭。
+/// 此时记录错误并改用 pending 占位，让服务继续运行，只依赖另一路信号。
 async fn shutdown_signal() {
     // 监听 Ctrl+C（本地开发环境）
     let ctrl_c = async {
+        // 返回 Err 说明控制台事件句柄安装失败，此时不应关闭服务
         if let Err(e) = signal::ctrl_c().await {
             tracing::error!("failed to install Ctrl+C handler: {}", e);
+            // 安装失败则阻塞，不触发关闭（与下方 SIGTERM 分支保持一致）
+            std::future::pending::<()>().await;
         }
     };
 
