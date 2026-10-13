@@ -14,14 +14,17 @@ pub fn expand(_attr: TokenStream, item: TokenStream) -> TokenStream {
             pub async fn delete(
                 &self,
                 db: &impl sea_orm::ConnectionTrait,
-            ) -> Result<sea_orm::DeleteResult, sea_orm::DbErr> {
+            ) -> Result<sea_orm::UpdateResult, sea_orm::DbErr> {
                 use sea_orm::sea_query::Expr;
-                let result = Entity::update_many()
-                    .col_expr(Column::DeleteTs, Expr::val(chrono::Utc::now().naive_utc()))
+
+                Entity::update_many()
+                    .col_expr(
+                        Column::DeleteTs,
+                        Expr::val(chrono::Utc::now().naive_utc()),
+                    )
                     .filter(Column::Id.eq(self.id))
                     .exec(db)
-                    .await?;
-                Ok(sea_orm::DeleteResult { rows_affected: result.rows_affected })
+                    .await
             }
 
             /// 硬删除：真正从数据库移除记录

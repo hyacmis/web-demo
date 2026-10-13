@@ -9,6 +9,8 @@ use serde_json::Value;
 
 use crate::project::response::JsonResponse;
 
+// 临时屏蔽报错
+#[allow(clippy::result_large_err)]
 pub async fn redirect_response(
     request: Request,
     next: Next,

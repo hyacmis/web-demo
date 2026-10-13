@@ -75,7 +75,7 @@ async fn main() {
         .with_state(app_state);
 
     // 绑定监听地址
-    let server_url = format!("{}:{}", &CONFIG.app.host, &CONFIG.app.port);
+    let server_url = format!("{}:{}", CONFIG.app.host, CONFIG.app.port);
     let listener = match tokio::net::TcpListener::bind(&server_url).await {
         Ok(l) => l,
         Err(e) => {
@@ -86,7 +86,11 @@ async fn main() {
 
     match listener.local_addr() {
         Ok(addr) => info!("listening on http://{}", addr),
-        Err(e) => tracing::warn!("listening on {} (local_addr unavailable: {})", server_url, e),
+        Err(e) => tracing::warn!(
+            "listening on {} (local_addr unavailable: {})",
+            server_url,
+            e
+        ),
     }
 
     // 启动服务器，支持优雅关闭（收到信号后等待请求处理完成再退出）

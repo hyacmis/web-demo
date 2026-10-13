@@ -10,7 +10,7 @@ members = [".", "entity", "macros"]
 # workspace 级共享依赖（子 crate 通过 `workspace = true` 引用）
 [workspace.dependencies]
 # ORM（PostgreSQL + tokio 运行时 + derive 宏 + schema 同步 + entity 注册表）
-sea-orm = { version = "=2.0.0-rc.36", features = [
+sea-orm = { version = "2", features = [
     "sqlx-postgres",
     "runtime-tokio-rustls",
     "macros",
@@ -79,7 +79,7 @@ oauth2 = { version = "4", features = ["reqwest"] }
 reqwest = { version = "0.12", features = ["json"] }
 
 # URL 解析
-url = "2"
+url = "2.5.8"
 
 # 随机数生成（验证码）
 rand = "0.8"
@@ -88,7 +88,7 @@ rand = "0.8"
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 
 # 正则表达式
-regex = "1.10"
+regex = "1.12.4"
 
 # URL 编码（Redis 密码特殊字符处理）
 percent-encoding = "2.3"
