@@ -3,8 +3,6 @@ use axum::routing::{get, post};
 
 use crate::constants::AppState;
 
-pub mod jwt;
-pub mod oauth2;
 pub mod schemas;
 pub mod view;
 

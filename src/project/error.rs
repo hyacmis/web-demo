@@ -1,11 +1,11 @@
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use garde::Report;
 use sea_orm::DbErr;
 use serde_json::json;
 use thiserror::Error;
 use tracing::error;
-use validator::ValidationErrors;
 
 // 定义自定义错误类型
 #[derive(Error, Debug)]
@@ -13,7 +13,7 @@ pub enum AppError {
     #[error("数据库错误: {0}")]
     DB(#[from] DbErr),
     #[error("验证错误: {0}")]
-    Validation(#[from] ValidationErrors),
+    Validation(#[from] Report),
     #[error("{1}")]
     Api(StatusCode, String),
 }
@@ -22,16 +22,16 @@ pub enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_message) = match self {
-            AppError::DB(e) => {
+            AppError::DB(_) => {
                 // 数据库错误不暴露内部细节，仅记录日志
-                error!("数据库错误: {}", e);
+                error!("数据库操作失败");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "服务器内部错误".to_string(),
                 )
             }
             AppError::Validation(e) => {
-                tracing::warn!("输入验证失败: {}", e);
+                tracing::warn!("输入验证失败");
                 return (
                     StatusCode::BAD_REQUEST,
                     Json(json!({
@@ -61,6 +61,75 @@ impl AppError {
     }
 }
 
+impl From<auth_core::AuthError> for AppError {
+    fn from(error: auth_core::AuthError) -> Self {
+        use auth_core::AuthError;
+
+        match error {
+            AuthError::Database(error) => Self::DB(error),
+            AuthError::PhoneAlreadyRegistered => {
+                Self::Api(StatusCode::BAD_REQUEST, "手机号已注册".to_string())
+            }
+            AuthError::PasswordTooLong => Self::Api(
+                StatusCode::BAD_REQUEST,
+                "密码不能超过72个UTF-8字节".to_string(),
+            ),
+            AuthError::InvalidCredentials => {
+                Self::Api(StatusCode::UNAUTHORIZED, "手机号或密码错误".to_string())
+            }
+            AuthError::UserNotFound => {
+                Self::Api(StatusCode::UNAUTHORIZED, "用户不存在".to_string())
+            }
+            AuthError::LinkedAccountNotFound => {
+                error!("OAuth 身份关联的本地账户不存在");
+                Self::internal("服务器内部错误")
+            }
+            AuthError::UnsupportedOAuthProvider => Self::Api(
+                StatusCode::BAD_REQUEST,
+                "不支持的 OAuth2 提供商".to_string(),
+            ),
+            AuthError::OAuthProviderNotConfigured => Self::Api(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "OAuth2 提供商未配置".to_string(),
+            ),
+            AuthError::InvalidOAuthState => Self::Api(
+                StatusCode::BAD_REQUEST,
+                "CSRF token 无效或已过期".to_string(),
+            ),
+            AuthError::InvalidOAuthProviderConfiguration => {
+                error!("OAuth2 提供商配置无效");
+                Self::internal("服务器内部错误")
+            }
+            AuthError::OAuthHttpClient
+            | AuthError::OAuthCodeExchange
+            | AuthError::OAuthProfileRequest
+            | AuthError::OAuthProfileResponse => {
+                error!("OAuth2 提供商认证流程失败");
+                Self::Api(StatusCode::BAD_GATEWAY, "OAuth2 提供商认证失败".to_string())
+            }
+            AuthError::InvalidRefreshToken => Self::Api(
+                StatusCode::UNAUTHORIZED,
+                "Refresh Token 无效或已过期".to_string(),
+            ),
+            AuthError::RefreshTokenRevoked => {
+                Self::Api(StatusCode::UNAUTHORIZED, "Refresh Token 已失效".to_string())
+            }
+            AuthError::Redis(error) => {
+                error!("认证服务 Redis 操作失败: {}", error);
+                Self::internal("服务器内部错误")
+            }
+            AuthError::PasswordHash(error) => {
+                error!("密码哈希操作失败: {}", error);
+                Self::internal("服务器内部错误")
+            }
+            AuthError::Token(error) => {
+                error!("JWT 操作失败: {}", error);
+                Self::internal("服务器内部错误")
+            }
+        }
+    }
+}
+
 pub type ApiResult<T> = Result<Json<T>, AppError>;
 
 /// 成功响应的辅助函数
@@ -84,6 +153,9 @@ pub enum StartupError {
     /// （数据库 / Redis 连接的详细原因已单独写入日志，避免凭据进入 stderr）
     #[error("初始化失败: {0}")]
     Init(String),
+    /// Invalid or incomplete application configuration
+    #[error("配置错误: {0}")]
+    Config(#[from] super::configs::ConfigError),
 }
 
 #[cfg(test)]
@@ -131,10 +203,10 @@ mod tests {
 
     #[test]
     fn from_validation_errors() {
-        use validator::Validate;
+        use garde::Validate;
         #[derive(Validate)]
         struct TestInput {
-            #[validate(required)]
+            #[garde(required)]
             pub name: Option<String>,
         }
         let input = TestInput { name: None };

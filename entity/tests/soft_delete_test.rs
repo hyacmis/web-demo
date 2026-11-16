@@ -5,11 +5,10 @@ use sea_orm::MockExecResult;
 mod test_entity {
     use macros::soft_delete;
     use sea_orm::entity::prelude::*;
-    use serde::Deserialize;
 
     #[soft_delete]
     #[sea_orm::model]
-    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Deserialize)]
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
     #[sea_orm(table_name = "test_table")]
     pub struct Model {
         #[sea_orm(primary_key)]
@@ -23,7 +22,7 @@ mod test_entity {
 
 use test_entity as TestEntity;
 
-/// 测试：find() 自动过滤已删除记录
+/// 测试：默认 find() 过滤已删除记录
 #[test]
 fn test_find_filters_deleted() {
     let db = MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
@@ -36,7 +35,6 @@ fn test_find_filters_deleted() {
         }]])
         .into_connection();
 
-    // find() 应该添加 delete_ts IS NULL 过滤
     let _result = futures::executor::block_on(async { TestEntity::Entity::find().all(&db).await });
 
     // 验证 SQL 包含 delete_ts IS NULL
@@ -45,12 +43,12 @@ fn test_find_filters_deleted() {
     let query = format!("{:?}", sql[0]);
     assert!(
         query.contains("delete_ts") && query.contains("NULL"),
-        "find() should filter by delete_ts IS NULL, got: {}",
+        "default find() should filter by delete_ts IS NULL, got: {}",
         query
     );
 }
 
-/// 测试：find_by_id() 自动过滤已删除记录
+/// 测试：默认 find_by_id() 过滤已删除记录
 #[test]
 fn test_find_by_id_filters_deleted() {
     let db = MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
@@ -71,7 +69,7 @@ fn test_find_by_id_filters_deleted() {
     let query = format!("{:?}", sql[0]);
     assert!(
         query.contains("delete_ts") && query.contains("NULL"),
-        "find_by_id() should filter by delete_ts IS NULL, got: {}",
+        "default find_by_id() should filter by delete_ts IS NULL, got: {}",
         query
     );
 }
@@ -117,14 +115,9 @@ fn test_find_all_includes_deleted() {
     );
 }
 
-/// 测试：delete() 执行软删除（UPDATE 而非 DELETE）
-/// 注意：#[sea_orm::model] 会干扰方法解析，导致调用 trait 方法
-/// 实际项目中 Model 不使用 #[sea_orm::model] 时，固有方法会正确覆盖
+/// 测试：默认 find() 显式过滤已删除记录
 #[test]
-fn test_delete_signature_exists() {
-    // 验证 Model 有 delete 方法（固有方法存在）
-    // 由于 #[sea_orm::model] 的干扰，运行时可能调用 trait 方法
-    // 但方法签名是正确的
+fn test_soft_delete_query_filters_deleted_records() {
     let model = TestEntity::Model {
         id: 1,
         name: "Alice".to_string(),
@@ -133,10 +126,6 @@ fn test_delete_signature_exists() {
         delete_ts: None,
     };
 
-    // 验证 Model 类型有 delete 方法（编译通过即表示方法存在）
-    let _ = &model;
-
-    // 验证 find 方法生成的 SQL 包含软删除过滤
     let db = MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
         .append_query_results([vec![model]])
         .into_connection();
@@ -147,8 +136,46 @@ fn test_delete_signature_exists() {
     let query = format!("{:?}", sql[0]);
     assert!(
         query.contains("delete_ts") && query.contains("IS NULL"),
-        "find() should filter soft deleted records, got: {}",
+        "default find() should filter soft deleted records, got: {}",
         query
+    );
+}
+
+/// 测试：软删除只更新一次，并同步更新时间戳
+#[test]
+fn test_soft_delete_updates_timestamps_once() {
+    let db = MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+        .append_exec_results([MockExecResult {
+            rows_affected: 1,
+            last_insert_id: 0,
+        }])
+        .into_connection();
+
+    let model = TestEntity::Model {
+        id: 1,
+        name: "Alice".to_string(),
+        create_ts: chrono::NaiveDateTime::default(),
+        update_ts: chrono::NaiveDateTime::default(),
+        delete_ts: None,
+    };
+
+    let result = futures::executor::block_on(async { model.delete(&db).await }).unwrap();
+    assert_eq!(result.rows_affected, 1);
+
+    let sql = db.into_transaction_log();
+    assert_eq!(sql.len(), 1);
+    let query = format!("{:?}", sql[0]);
+    assert!(
+        query.contains("UPDATE"),
+        "expected UPDATE query, got: {query}"
+    );
+    assert!(
+        query.contains("update_ts"),
+        "soft delete should update update_ts, got: {query}"
+    );
+    assert!(
+        query.contains("delete_ts") && query.contains("NULL"),
+        "soft delete should only affect active rows, got: {query}"
     );
 }
 

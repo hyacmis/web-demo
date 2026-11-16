@@ -1,33 +1,31 @@
-use regex::Regex;
+use garde::Validate;
 use serde::{Deserialize, Serialize};
-use std::sync::LazyLock;
 use utoipa::ToSchema;
-use validator::Validate;
-
-static PHONE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^1[3-9]\d{9}$").unwrap());
 
 /// 发送验证码请求
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+#[garde(allow_unvalidated)]
 pub struct SendSmsCodeInput {
     /// 手机号
-    #[validate(regex(path = *PHONE_REGEX, message = "手机号格式不正确"))]
+    #[garde(custom(crate::helper::validation::validate_phone))]
     pub phone: String,
 }
 
 /// 注册请求
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+#[garde(allow_unvalidated)]
 pub struct RegisterInput {
     /// 手机号
-    #[validate(regex(path = *PHONE_REGEX, message = "手机号格式不正确"))]
+    #[garde(custom(crate::helper::validation::validate_phone))]
     pub phone: String,
     /// 验证码
-    #[validate(length(equal = 6, message = "验证码必须为6位"))]
+    #[garde(length(equal = 6))]
     pub code: String,
     /// 密码
-    #[validate(length(min = 6, message = "密码长度不能少于6位"))]
+    #[garde(length(min = 6), custom(auth_core::validate_bcrypt_password))]
     pub password: String,
     /// 昵称
-    #[validate(length(min = 1, message = "昵称不能为空"))]
+    #[garde(length(min = 1))]
     pub nickname: String,
     /// 姓名（可选）
     pub name: Option<String>,
@@ -35,12 +33,13 @@ pub struct RegisterInput {
 
 /// 登录请求
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+#[garde(allow_unvalidated)]
 pub struct LoginInput {
     /// 手机号
-    #[validate(regex(path = *PHONE_REGEX, message = "手机号格式不正确"))]
+    #[garde(custom(crate::helper::validation::validate_phone))]
     pub phone: String,
     /// 密码
-    #[validate(length(min = 6, max = 128, message = "密码长度必须在6-128位之间"))]
+    #[garde(length(min = 6), custom(auth_core::validate_bcrypt_password))]
     pub password: String,
 }
 
@@ -57,8 +56,20 @@ pub struct LoginOutput {
     pub refresh_expires_in: i64,
 }
 
+impl From<auth_core::TokenPair> for LoginOutput {
+    fn from(tokens: auth_core::TokenPair) -> Self {
+        Self {
+            token: tokens.token,
+            expires_in: tokens.expires_in,
+            refresh_token: tokens.refresh_token,
+            refresh_expires_in: tokens.refresh_expires_in,
+        }
+    }
+}
+
 /// 刷新 Token 请求
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+#[garde(allow_unvalidated)]
 pub struct RefreshInput {
     /// Refresh Token
     pub refresh_token: String,

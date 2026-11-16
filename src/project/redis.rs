@@ -10,7 +10,7 @@ pub async fn set_ex(
     use redis::AsyncCommands;
     let mut conn = redis.clone();
     conn.set_ex(key, value, ttl).await.map_err(|e| {
-        tracing::error!("Redis SETEX 失败 ({}): {}", key, e);
+        tracing::error!("Redis SETEX 操作失败: {}", e);
         AppError::internal("服务器内部错误")
     })
 }
@@ -24,20 +24,45 @@ pub async fn get(
     use redis::AsyncCommands;
     let mut conn = redis.clone();
     conn.get(key).await.map_err(|e| {
-        tracing::error!("Redis GET 失败 ({}): {}", key, e);
+        tracing::error!("Redis GET 操作失败: {}", e);
         AppError::internal("服务器内部错误")
     })
 }
 
-/// Redis GETDEL 辅助函数
-pub async fn get_del(
+/// Atomically verify and consume an SMS code, limiting incorrect attempts.
+pub async fn verify_and_consume_code(
     redis: &redis::aio::ConnectionManager,
-    key: &str,
-) -> Result<Option<String>, AppError> {
-    use redis::AsyncCommands;
+    code_key: &str,
+    attempts_key: &str,
+    code: &str,
+    ttl: u64,
+    max_attempts: u64,
+) -> Result<i32, AppError> {
     let mut conn = redis.clone();
-    conn.get_del(key).await.map_err(|e| {
-        tracing::error!("Redis GETDEL 失败 ({}): {}", key, e);
+    redis::Script::new(
+        "local stored = redis.call('GET', KEYS[1]); \
+         if not stored then return -1 end; \
+         if stored == ARGV[1] then \
+             redis.call('DEL', KEYS[1], KEYS[2]); \
+             return 1; \
+         end; \
+         local attempts = redis.call('INCR', KEYS[2]); \
+         if attempts == 1 then redis.call('EXPIRE', KEYS[2], ARGV[2]); end; \
+         if attempts >= tonumber(ARGV[3]) then \
+             redis.call('DEL', KEYS[1], KEYS[2]); \
+             return -2; \
+         end; \
+         return 0;",
+    )
+    .key(code_key)
+    .key(attempts_key)
+    .arg(code)
+    .arg(ttl)
+    .arg(max_attempts)
+    .invoke_async(&mut conn)
+    .await
+    .map_err(|e| {
+        tracing::error!("Redis 验证码校验失败: {}", e);
         AppError::internal("服务器内部错误")
     })
 }
@@ -59,7 +84,7 @@ pub async fn set_nx_with_expire(
         .query_async(&mut conn)
         .await
         .map_err(|e| {
-            tracing::error!("Redis SET NX EX 失败 ({}): {}", key, e);
+            tracing::error!("Redis SET NX EX 操作失败: {}", e);
             AppError::internal("服务器内部错误")
         })?;
     Ok(result.is_some())

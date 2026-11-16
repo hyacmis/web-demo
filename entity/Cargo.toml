@@ -13,13 +13,13 @@ path = "src/lib.rs"
 # ──────────────────────────────────────────────
 [dependencies]
 # ORM（workspace 共享，features 由 workspace.dependencies 定义）
-sea-orm = { workspace = true }
+sea-orm.workspace = true
 # 序列化 / 反序列化
-serde = { workspace = true }
+serde.workspace = true
 # 日期时间
-chrono = { workspace = true }
+chrono.workspace = true
 # 自定义 derive 宏（soft_delete 等）
-macros = { path = "../macros" }
+macros.workspace = true
 
 # ──────────────────────────────────────────────
 # 开发 / 测试依赖

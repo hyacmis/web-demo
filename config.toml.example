@@ -1,45 +1,49 @@
 [app]
-host=
-port=
-env=
+host = ""
+port = 0
+env = ""
 
 [log]
-level=
-path=
-filename=
+level = ""
+path = ""
+filename = ""
 
 [database]
-debug=
-host=
-port=
-username=
-password=
-dbname=
+debug = false
+url = ""
+# MySQL: url = "mysql://user:password@127.0.0.1:3306/"
+# PostgreSQL: url = "postgres://user:password@127.0.0.1:5432/"
 
 [jwt]
-secret=
-expires_in_hours=
-refresh_secret=
-refresh_expires_in_days=
+secret = ""
+expires_in_hours = 0
+refresh_secret = ""
+refresh_expires_in_days = 0
 
 [redis]
-host=
-port=
-password=
-db=
+host = ""
+port = 0
 
 [oauth2.providers.github]
-client_id=
-client_secret=
-auth_url="https://github.com/login/oauth/authorize"
-token_url="https://github.com/login/oauth/access_token"
-redirect_url="http://localhost:3000/api/v1/auth/github/callback"
-scopes=["user:email"]
+client_id = ""
+client_secret = ""
+auth_url = ""
+token_url = ""
+redirect_url = ""
+scopes = []
 
 [oauth2.providers.google]
-client_id=
-client_secret=
-auth_url="https://accounts.google.com/o/oauth2/v2/auth"
-token_url="https://oauth2.googleapis.com/token"
-redirect_url="http://localhost:3000/api/v1/auth/google/callback"
-scopes=["openid", "profile", "email"]
+client_id = ""
+client_secret = ""
+auth_url = ""
+token_url = ""
+redirect_url = ""
+scopes = []
+
+[oauth2.providers.microsoft]
+client_id = ""
+client_secret = ""
+auth_url = ""
+token_url = ""
+redirect_url = ""
+scopes = []

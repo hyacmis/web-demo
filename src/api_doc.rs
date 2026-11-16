@@ -67,11 +67,13 @@ fn wrap_responses(mut api: openapi::OpenApi) -> openapi::OpenApi {
                 if resp.content.is_empty() {
                     resp.content.insert(
                         "application/json".to_string(),
-                        Content::builder().schema(Some(wrap_schema(None))).build(),
+                        RefOr::T(Content::builder().schema(Some(wrap_schema(None))).build()),
                     );
                 } else {
                     for content in resp.content.values_mut() {
-                        content.schema = Some(wrap_schema(content.schema.take()));
+                        if let RefOr::T(content) = content {
+                            content.schema = Some(wrap_schema(content.schema.take()));
+                        }
                     }
                 }
             }

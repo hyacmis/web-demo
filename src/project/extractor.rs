@@ -3,8 +3,8 @@ use axum::{
     extract::{FromRequest, FromRequestParts, Json, Path, Query},
     http::{Request, StatusCode, request::Parts},
 };
+use garde::Validate;
 use serde::de::DeserializeOwned;
-use validator::Validate;
 
 use super::error::AppError;
 
@@ -35,7 +35,7 @@ impl<S: Send + Sync> FromRequestParts<S> for ResourceId {
 
 /// 自动校验的 JSON 提取器
 ///
-/// 在反序列化完成后自动调用 `validate()`，校验失败返回 400。
+/// 在反序列化完成后自动调用 Garde 校验，校验失败返回 400。
 /// 用法完全等同于 `Json<T>`：
 ///
 /// ```rust,ignore
@@ -53,6 +53,7 @@ impl<T> std::ops::Deref for ValidatedJson<T> {
 impl<T, S> FromRequest<S, Body> for ValidatedJson<T>
 where
     T: DeserializeOwned + Validate,
+    T::Context: Default,
     S: Send + Sync,
 {
     type Rejection = AppError;
@@ -61,7 +62,7 @@ where
         let value = Json::<T>::from_request(req, state)
             .await
             .map_err(|_| AppError::Api(StatusCode::BAD_REQUEST, "请求参数格式错误".to_string()))?;
-        value.validate()?;
+        value.validate().map_err(AppError::Validation)?;
         Ok(ValidatedJson(value.0))
     }
 }
@@ -85,6 +86,7 @@ impl<T> std::ops::Deref for ValidatedQuery<T> {
 impl<T, S> FromRequestParts<S> for ValidatedQuery<T>
 where
     T: DeserializeOwned + Validate,
+    T::Context: Default,
     S: Send + Sync,
 {
     type Rejection = AppError;
@@ -93,7 +95,7 @@ where
         let value = Query::<T>::from_request_parts(parts, state)
             .await
             .map_err(|e| AppError::Api(StatusCode::BAD_REQUEST, e.body_text()))?;
-        value.validate()?;
+        value.validate().map_err(AppError::Validation)?;
         Ok(ValidatedQuery(value.0))
     }
 }
@@ -145,9 +147,11 @@ mod tests {
     // ── ValidatedJson 提取路径测试 ──
 
     #[derive(Debug, Deserialize, Validate)]
+    #[garde(allow_unvalidated)]
     struct TestInput {
-        #[validate(length(min = 1, message = "名称不能为空"))]
+        #[garde(length(min = 1))]
         name: String,
+        #[garde(skip)]
         age: u32,
     }
 
@@ -202,9 +206,11 @@ mod tests {
     // ── ValidatedQuery 提取路径测试 ──
 
     #[derive(Debug, Deserialize, Validate)]
+    #[garde(allow_unvalidated)]
     struct TestQuery {
-        #[validate(length(min = 1, message = "keyword 不能为空"))]
+        #[garde(length(min = 1))]
         keyword: String,
+        #[garde(skip)]
         page: Option<u32>,
     }
 

@@ -8,6 +8,7 @@
 **/.classpath
 **/.dockerignore
 **/.env
+**/config.toml
 **/.git
 **/.gitignore
 **/.project
@@ -28,4 +29,7 @@
 **/values.dev.yaml
 /bin
 /target
+/*.db
+/*.db-*
+logs
 README.md

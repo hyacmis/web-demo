@@ -10,19 +10,19 @@ pub fn expand(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #input
 
         impl #name {
-            /// 删除（默认软删除）：设置 delete_ts
+            /// 软删除记录：设置 delete_ts
             pub async fn delete(
                 &self,
                 db: &impl sea_orm::ConnectionTrait,
             ) -> Result<sea_orm::UpdateResult, sea_orm::DbErr> {
                 use sea_orm::sea_query::Expr;
 
+                let now = chrono::Utc::now().naive_utc();
                 Entity::update_many()
-                    .col_expr(
-                        Column::DeleteTs,
-                        Expr::val(chrono::Utc::now().naive_utc()),
-                    )
+                    .col_expr(Column::DeleteTs, Expr::val(now))
+                    .col_expr(Column::UpdateTs, Expr::val(now))
                     .filter(Column::Id.eq(self.id))
+                    .filter(Column::DeleteTs.is_null())
                     .exec(db)
                     .await
             }
@@ -37,12 +37,12 @@ pub fn expand(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         impl Entity {
-            /// 查询未删除的记录（默认过滤器）
+            /// 默认只查询未删除的记录
             pub fn find() -> sea_orm::Select<Entity> {
                 <Entity as sea_orm::EntityTrait>::find().filter(Column::DeleteTs.is_null())
             }
 
-            /// 按 ID 查询未删除记录
+            /// 默认按 ID 查询未删除记录
             pub fn find_by_id(id: <<Entity as sea_orm::EntityTrait>::PrimaryKey as sea_orm::PrimaryKeyTrait>::ValueType) -> sea_orm::Select<Entity> {
                 <Entity as sea_orm::EntityTrait>::find_by_id(id).filter(Column::DeleteTs.is_null())
             }

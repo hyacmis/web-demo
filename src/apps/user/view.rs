@@ -1,7 +1,6 @@
 use super::constants::ClassType;
 use super::schemas::{UserCreate, UserListInput, UserListOutput, UserOutput, UserPatch};
 use crate::constants::AppState;
-use crate::helper::crypto;
 use crate::project::error::{ApiResult, AppError, ok};
 use crate::project::extractor::ValidatedJson;
 use crate::project::extractor::ValidatedQuery;
@@ -9,7 +8,10 @@ use crate::project::middlewares::auth::AuthContext;
 use crate::project::pagination::{PagePagination, PaginationInput};
 use axum::extract::State;
 use axum::http::StatusCode;
-use entity::prelude::Account;
+use entity::{
+    account::{ActiveModel as AccountActiveModel, Column as AccountColumn},
+    prelude::Account,
+};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, IntoActiveModel, PaginatorTrait,
     QueryFilter, QueryOrder, QuerySelect,
@@ -23,44 +25,54 @@ use uuid::Uuid;
     tag = "用户管理",
     params(UserListInput,PaginationInput),
     responses(
-        (status = 200, body = PagePagination<UserListOutput>)
+        (status = 200, body = PagePagination<UserListOutput>),
+        (status = 403, description = "仅内部员工可调用")
     )
 )]
 pub async fn user_list(
     State(state): State<AppState>,
+    auth: AuthContext,
     ValidatedQuery(input): ValidatedQuery<UserListInput>,
     ValidatedQuery(pagination): ValidatedQuery<PaginationInput>,
 ) -> ApiResult<PagePagination<UserListOutput>> {
+    require_internal_staff(&auth)?;
+
     let page = pagination.page;
     let page_size = pagination.page_size;
+    let offset = pagination.offset().ok_or_else(|| {
+        AppError::Api(
+            StatusCode::BAD_REQUEST,
+            "分页偏移量超出支持范围".to_string(),
+        )
+    })?;
 
-    let query = Account::Entity::find()
+    let query = Account::find()
         .select_only()
         .columns([
-            Account::Column::Id,
-            Account::Column::Nickname,
-            Account::Column::Type,
-            Account::Column::Name,
-            Account::Column::Gender,
-            Account::Column::Telephone,
+            AccountColumn::Id,
+            AccountColumn::Nickname,
+            AccountColumn::Type,
+            AccountColumn::Name,
+            AccountColumn::Gender,
+            AccountColumn::Telephone,
         ])
         .filter(
             Condition::all()
-                .add_option(input.r#type.map(|t| Account::Column::Type.eq(t)))
-                .add_option(input.name.map(|n| Account::Column::Name.contains(n)))
+                .add_option(input.r#type.map(|t| AccountColumn::Type.eq(t)))
+                .add_option(input.name.map(|n| AccountColumn::Name.contains(n)))
                 .add_option(
                     input
                         .telephone
-                        .map(|t| Account::Column::Telephone.contains(t)),
+                        .map(|t| AccountColumn::Telephone.contains(t)),
                 ),
         );
 
     let total = query.clone().count(&state.db).await?;
     let data = query
-        .order_by_desc(Account::Column::Id)
+        .order_by_desc(AccountColumn::Id)
         .into_model::<UserListOutput>()
         .paginate(&state.db, page_size)
-        .fetch_page(page - 1)
+        .fetch_page(offset / page_size)
         .await?;
 
     ok(PagePagination {
@@ -79,17 +91,21 @@ pub async fn user_list(
     request_body = UserCreate,
     responses(
         (status = 200),
-        (status = 400, description = "Validation error")
+        (status = 400, description = "Validation error"),
+        (status = 403, description = "仅内部员工可调用")
     )
 )]
 pub async fn user_create(
     State(state): State<AppState>,
+    auth: AuthContext,
     ValidatedJson(input): ValidatedJson<UserCreate>,
 ) -> ApiResult<()> {
-    // 密码哈希
-    let hashed_password = crypto::hash_password(&input.password)?;
+    require_internal_staff(&auth)?;
 
-    let obj = Account::ActiveModel {
+    // 密码哈希
+    let hashed_password = auth_core::hash_password(&input.password)?;
+
+    let obj = AccountActiveModel {
         uid: Set(Uuid::new_v4().to_string()),
         nickname: Set(input.nickname),
         password: Set(hashed_password),
@@ -121,7 +137,7 @@ pub async fn user_detail(
     State(state): State<AppState>,
     auth: AuthContext,
 ) -> ApiResult<UserOutput> {
-    let user = Account::Entity::find_by_id(auth.user_id)
+    let user = Account::find_by_id(auth.user_id)
         .into_model::<UserOutput>()
         .one(&state.db)
         .await?
@@ -145,7 +161,14 @@ pub async fn user_patch(
     auth: AuthContext,
     ValidatedJson(data): ValidatedJson<UserPatch>,
 ) -> ApiResult<()> {
-    let mut obj = Account::Entity::find_by_id(auth.user_id)
+    if data.is_empty() {
+        return Err(AppError::Api(
+            StatusCode::BAD_REQUEST,
+            "至少需要提供一个要更新的字段".to_string(),
+        ));
+    }
+
+    let mut obj = Account::find_by_id(auth.user_id)
         .one(&state.db)
         .await?
         .ok_or_else(|| AppError::Api(StatusCode::NOT_FOUND, "用户不存在".to_string()))?
@@ -155,27 +178,38 @@ pub async fn user_patch(
         obj.nickname = Set(v)
     }
     if let Some(v) = data.password {
-        let hashed_password = crypto::hash_password(&v)?;
+        let hashed_password = auth_core::hash_password(&v)?;
         obj.password = Set(hashed_password)
     }
     if let Some(v) = data.gender {
         obj.gender = Set(v as i16)
     }
-    if data.name.is_some() {
-        obj.name = Set(data.name)
+    if let Some(v) = data.name {
+        obj.name = Set(v)
     }
-    if data.telephone.is_some() {
-        obj.telephone = Set(data.telephone)
+    if let Some(v) = data.telephone {
+        obj.telephone = Set(v)
     }
-    if data.email.is_some() {
-        obj.email = Set(data.email)
+    if let Some(v) = data.email {
+        obj.email = Set(v)
     }
-    if data.address.is_some() {
-        obj.address = Set(data.address)
+    if let Some(v) = data.address {
+        obj.address = Set(v)
     }
 
     obj.update(&state.db).await?;
     ok(())
+}
+
+fn require_internal_staff(auth: &AuthContext) -> Result<(), AppError> {
+    if auth.user_type != ClassType::InternalStaff as i16 {
+        return Err(AppError::Api(
+            StatusCode::FORBIDDEN,
+            "无权执行用户管理操作".to_string(),
+        ));
+    }
+
+    Ok(())
 }
 
 /// 删除当前用户
@@ -189,7 +223,7 @@ pub async fn user_patch(
     )
 )]
 pub async fn user_delete(State(state): State<AppState>, auth: AuthContext) -> ApiResult<()> {
-    let obj = Account::Entity::find_by_id(auth.user_id)
+    let obj = Account::find_by_id(auth.user_id)
         .one(&state.db)
         .await?
         .ok_or_else(|| AppError::Api(StatusCode::NOT_FOUND, "用户不存在".to_string()))?;

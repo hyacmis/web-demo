@@ -5,12 +5,18 @@ edition = "2024"
 license = "MIT"
 
 [workspace]
-members = [".", "entity", "macros"]
+members = [
+    ".",
+    "auth",
+    "entity",
+    "macros",
+]
 
-# workspace 级共享依赖（子 crate 通过 `workspace = true` 引用）
+# Workspace dependency catalog: shared versions and feature unions live here.
 [workspace.dependencies]
-# ORM（PostgreSQL + tokio 运行时 + derive 宏 + schema 同步 + entity 注册表）
 sea-orm = { version = "2", features = [
+    "sqlx-sqlite",
+    "sqlx-mysql",
     "sqlx-postgres",
     "runtime-tokio-rustls",
     "macros",
@@ -18,86 +24,85 @@ sea-orm = { version = "2", features = [
     "schema-sync",
     "entity-registry",
 ] }
-# 序列化 / 反序列化
-serde = { version = "1.0.228", features = ["derive"] }
-# 日期时间
-chrono = "0.4.42"
-
-[dependencies]
-# 内部模块
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+oauth2 = { version = "5", default-features = false, features = ["reqwest", "native-tls"] }
+chrono = "0.4.45"
+garde = { version = "0.23", features = ["derive", "email", "url", "serde"] }
+redis = { version = "1.8", features = ["tokio-comp", "connection-manager"] }
+thiserror = "2.0.21"
+uuid = { version = "1.29.2", features = ["v4"] }
 entity = { path = "entity" }
 macros = { path = "macros" }
+auth-core = { path = "auth" }
+
+[dependencies]
+entity.workspace = true
+macros.workspace = true
+auth-core.workspace = true
 
 # Web 框架
 axum = "0.8.9"
 
 # 异步运行时（full: signal、net、time 等全部子模块）
-tokio = { version = "1.52.3", features = ["full"] }
+tokio = { version = "1.54.1", features = ["full"] }
 
 # 中间件
 tower = { version = "0.5.3", features = ["full"] }
-tower-http = { version = "0.6.11", features = ["trace", "compression-br"] }
+tower-http = { version = "0.7.1", features = ["trace", "compression-br"] }
 
-# ORM
-sea-orm = { workspace = true }
+sea-orm.workspace = true
 
 # 日志
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 tracing-appender = "0.2.5"
 
-# 序列化 / 反序列化
-serde = { workspace = true }
-serde_json = "1.0.150"
+serde.workspace = true
+serde_json.workspace = true
 
 # 错误处理
-thiserror = "2.0.17"
+thiserror.workspace = true
 
 # 日期 / 唯一标识
-chrono = { workspace = true }
-uuid = { version = "1.23.3", features = ["v4"] }
+chrono.workspace = true
+uuid.workspace = true
 
 # 字段校验
-validator = { version = "0.18", features = ["derive"] }
+garde.workspace = true
 
 # 配置文件加载（默认 feature 包含 toml 解析）
-config = "0.15.23"
+config = "0.15.27"
 
 # HTTP body 工具（中间件读取响应 body）
-http-body-util = "0.1.3"
-
-# JWT 认证
-jsonwebtoken = "10.3.0"
-
-# 密码哈希
-bcrypt = "0.16"
-
-# OAuth2 客户端
-oauth2 = { version = "4", features = ["reqwest"] }
-
-# HTTP 客户端（用于 OAuth2 token 交换和 GitHub API 调用）
-reqwest = { version = "0.12", features = ["json"] }
+http-body-util = "0.1.5"
 
 # URL 解析
 url = "2.5.8"
 
 # 随机数生成（验证码）
-rand = "0.8"
+rand = "0.10"
 
-# Redis 客户端
-redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+redis.workspace = true
 
 # 正则表达式
-regex = "1.12.4"
+regex = "1.13.1"
 
 # URL 编码（Redis 密码特殊字符处理）
 percent-encoding = "2.3"
 
 # OpenAPI 文档生成 + Scalar UI
-utoipa = { version = "5.5.0", features = ["chrono"] }
-utoipa-scalar = { version = "0.3", features = ["axum"] }
-utoipauto = "0.2"
+utoipa = { version = "6.0.0", features = ["chrono"] }
+utoipa-scalar = { version = "0.4", features = ["axum"] }
+utoipauto = "0.3"
 
 [dev-dependencies]
 # mock 数据库连接（仅测试使用）
 sea-orm = { workspace = true, features = ["mock"] }
+
+# MSVC 下这两个 C 依赖的调试信息会触发 D8050；保留其余开发依赖的符号
+[profile.dev.package.ring]
+debug = false
+
+[profile.dev.package.libsqlite3-sys]
+debug = false

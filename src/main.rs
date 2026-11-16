@@ -7,7 +7,8 @@ use tracing::{Level, info};
 use utoipa_scalar::{Scalar, Servable};
 
 use api_doc::ApiDoc;
-use constants::{AppState, CONFIG};
+use constants::{AppState, CONFIG, config};
+use project::configs::Configs;
 use project::error::StartupError;
 use project::middlewares::auth::auth_middleware;
 use project::{db, fallback, logger, middlewares::response::redirect_response};
@@ -20,24 +21,30 @@ mod project;
 
 #[tokio::main]
 async fn main() -> Result<(), StartupError> {
+    let loaded_config = Configs::load()?;
+    CONFIG
+        .set(loaded_config)
+        .map_err(|_| StartupError::Init("应用配置已重复初始化".to_string()))?;
+    let config = config();
+
     // 初始化日志系统，返回 guard 用于保持日志写入器存活
     // guard 必须保持到程序结束，否则日志可能未写入就丢失
-    let _guard = logger::init(&CONFIG);
+    let _guard = logger::init(config)?;
 
     // 初始化数据库连接（自动同步 Schema）
-    let db = match db::init(&CONFIG.database).await {
+    let db = match db::init(&config.database).await {
         Ok(d) => d,
-        Err(e) => {
-            tracing::error!("数据库连接失败: {}", e);
+        Err(_) => {
+            tracing::error!("数据库连接失败，请检查数据库配置和服务状态");
             return Err(StartupError::Init("数据库连接失败".into()));
         }
     };
 
     // 初始化 Redis 连接
-    let redis_conn = match db::init_redis(&CONFIG.redis).await {
+    let redis_conn = match db::init_redis(&config.redis).await {
         Ok(r) => r,
-        Err(e) => {
-            tracing::error!("Redis 连接失败: {}", e);
+        Err(_) => {
+            tracing::error!("Redis 连接失败，请检查 Redis 配置和服务状态");
             return Err(StartupError::Init("Redis 连接失败".into()));
         }
     };
@@ -61,7 +68,10 @@ async fn main() -> Result<(), StartupError> {
     let middleware_stack = ServiceBuilder::new()
         .layer(trace)
         .layer(CompressionLayer::new())
-        .layer(middleware::from_fn(auth_middleware))
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            auth_middleware,
+        ))
         .layer(middleware::from_fn(redirect_response));
 
     // OpenAPI 文档（utoipauto 自动收集，响应体自动包装为 JsonResponse）
@@ -76,7 +86,7 @@ async fn main() -> Result<(), StartupError> {
         .with_state(app_state);
 
     // 绑定监听地址
-    let server_url = format!("{}:{}", CONFIG.app.host, CONFIG.app.port);
+    let server_url = format!("{}:{}", config.app.host, config.app.port);
     let listener = match tokio::net::TcpListener::bind(&server_url).await {
         Ok(l) => l,
         Err(e) => {

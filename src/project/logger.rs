@@ -23,13 +23,14 @@ impl FormatTime for LocalTimer {
 /// 初始化日志系统
 /// - 开发环境：输出到 stdout，启用颜色和详细信息
 /// - 生产环境：写入文件，关闭颜色、线程ID、目标以减少日志量
-pub fn init(cfg: &Configs) -> WorkerGuard {
+pub fn init(cfg: &Configs) -> Result<WorkerGuard, std::io::Error> {
     // 设置日志等级
-    let level = Level::from_str(&cfg.log.level).unwrap_or(Level::INFO);
+    let level = Level::from_str(&cfg.log.level.to_ascii_uppercase())
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
 
     // 创建日志目录（生产环境）
     if cfg.app.is_prod() {
-        let _ = std::fs::create_dir_all(&cfg.log.path);
+        std::fs::create_dir_all(&cfg.log.path)?;
     }
 
     // 生产环境 → 写入文件（按天滚动）
@@ -78,5 +79,5 @@ pub fn init(cfg: &Configs) -> WorkerGuard {
         .with(fmt_layer)
         .init();
 
-    guard
+    Ok(guard)
 }

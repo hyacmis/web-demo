@@ -2,11 +2,9 @@
 
 use crate::soft_delete;
 use sea_orm::entity::prelude::*;
-use serde::Deserialize;
-
 #[soft_delete]
 #[sea_orm::model]
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "account")]
 pub struct Model {
     #[sea_orm(primary_key)]

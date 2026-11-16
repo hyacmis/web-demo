@@ -1,6 +1,6 @@
+use garde::Validate;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
-use validator::Validate;
 
 /// 分页查询参数
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema, IntoParams, Validate, Default)]
@@ -9,13 +9,22 @@ pub struct PaginationInput {
     /// 页码（从 1 开始）
     #[serde(default = "default_page")]
     #[param(default = 1, example = 1, minimum = 1)]
-    #[validate(range(min = 1))]
+    #[garde(range(min = 1))]
     pub page: u64,
     /// 每页条数
     #[serde(default = "default_page_size")]
     #[param(default = 10, example = 10, minimum = 5, maximum = 100)]
-    #[validate(range(min = 5, max = 100))]
+    #[garde(range(min = 5, max = 100))]
     pub page_size: u64,
+}
+
+impl PaginationInput {
+    pub fn offset(&self) -> Option<u64> {
+        self.page
+            .checked_sub(1)?
+            .checked_mul(self.page_size)
+            .filter(|offset| *offset <= i64::MAX as u64)
+    }
 }
 
 fn default_page() -> u64 {
@@ -24,6 +33,29 @@ fn default_page() -> u64 {
 
 fn default_page_size() -> u64 {
     10
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PaginationInput;
+
+    #[test]
+    fn computes_zero_based_page_offset() {
+        let input = PaginationInput {
+            page: 3,
+            page_size: 10,
+        };
+        assert_eq!(input.offset(), Some(20));
+    }
+
+    #[test]
+    fn rejects_offsets_outside_database_range() {
+        let input = PaginationInput {
+            page: u64::MAX,
+            page_size: 100,
+        };
+        assert_eq!(input.offset(), None);
+    }
 }
 
 /// 分页响应结构
